@@ -16,9 +16,10 @@ created by mainmas2964  2025, 4 october
 struct Entity
 {
     uint32_t id;
+    uint32_t version;
     
     bool operator==(const Entity& other) const {
-        return id == other.id;
+        return id == other.id && version == other.version;
     }
 };
 
@@ -26,7 +27,7 @@ namespace std {
     template<>
     struct hash<Entity> {
         size_t operator()(const Entity& e) const {
-            return hash<uint32_t>()(e.id);
+            return hash<uint32_t>()(e.id) ^ (hash<uint32_t>()(e.version) << 1);
         }
     };
 }
@@ -73,7 +74,9 @@ public:
     
 private:
     uint32_t nextEntityId = 0;
-    std::unordered_set<Entity> activeEntities;
+    uint32_t activeCount = 0;
+    std::vector<uint32_t> versions;
+    std::vector<bool> active;
     std::vector<uint32_t> freeIds;
 };
 #endif

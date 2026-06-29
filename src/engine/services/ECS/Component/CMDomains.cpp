@@ -20,6 +20,7 @@ constexpr uint32_t registerGroupHash = fnv1aHashConst("fractal_engine:ecs:regist
 constexpr uint32_t containsHash = fnv1aHashConst("fractal_engine:ecs:contains");
 constexpr uint32_t hasAllHash = fnv1aHashConst("fractal_engine:ecs:hasAll");
 constexpr uint32_t getGroupSizeHash = fnv1aHashConst("fractal_engine:ecs:getGroupSize");
+constexpr uint32_t queryEntitiesHash = fnv1aHashConst("fractal_engine:ecs:queryEntities");
 constexpr uint32_t getRawPtrHash = fnv1aHashConst("fractal_engine:ecs:getRawPtr");
 constexpr uint32_t getComponentLockHash = fnv1aHashConst("fractal_engine:ecs:getComponentLock");
 constexpr uint32_t setComponentLockHash = fnv1aHashConst("fractal_engine:ecs:setComponentLock");
@@ -42,6 +43,7 @@ CMDomains::CMDomains(){
     FractalKernel::instance().registerCMDMethod(containsHash, &containsCMD);
     FractalKernel::instance().registerCMDMethod(hasAllHash, &hasAllCMD);
     FractalKernel::instance().registerCMDMethod(getGroupSizeHash, &getGroupSizeCMD);
+    FractalKernel::instance().registerCMDMethod(queryEntitiesHash, &queryEntitiesCMD);
     FractalKernel::instance().registerCMDMethod(getRawPtrHash, &getRawPtrCMD);
     FractalKernel::instance().registerCMDMethod(getComponentLockHash, &getComponentLockCMD);
     FractalKernel::instance().registerCMDMethod(setComponentLockHash, &setComponentLockCMD);
@@ -161,7 +163,19 @@ void CMDomains::getGroupSizeCMD(FURCMDPacket &packet) {
         *reinterpret_cast<size_t*>(packet.outputBuffer) = groupSize;
     }
 }
+
+void CMDomains::queryEntitiesCMD(FURCMDPacket &packet) {
+    queryEntitiesCMDContext& context = *reinterpret_cast<queryEntitiesCMDContext*>(packet.payload);
+    uint32_t domainId = context.domainId;
+    auto it = componentManagers.find(domainId);
+    if (it != componentManagers.end()) {
+        auto* manager = it->second;
+        manager->queryEntities(context.componentHashIds, context.count, static_cast<Entity*>(packet.outputBuffer));
+    }
+}
+
 void CMDomains::getRawPtrCMD(FURCMDPacket &packet) {
+
     getRawPtrCMDContext& context = *reinterpret_cast<getRawPtrCMDContext*>(packet.payload);
     uint32_t domainId = context.domainId;
     auto it = componentManagers.find(domainId);

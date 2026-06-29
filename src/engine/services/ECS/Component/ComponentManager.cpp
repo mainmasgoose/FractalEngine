@@ -43,9 +43,9 @@ void ComponentManager::flushCommands() {
 void ComponentManager::registerComponent(const uint32_t hashId, size_t elementSize, size_t capacity) {
 	if (components.find(hashId) != components.end()) return;
 	
-	size_t alignedElementSize = (elementSize + 15) & ~15;
-	// Allocate enough space for data, sparse and dense arrays + some extra
-	size_t totalBlockSize = alignedElementSize * capacity + (2 * capacity * sizeof(uint32_t)) + 1024;
+    size_t alignedElementSize = (elementSize + 15) & ~15;
+    size_t totalBlockSize = alignedElementSize * capacity + (2 * capacity * sizeof(uint32_t)) + 1024;
+
 	
 	EngineArena* arena = std::make_unique<EngineArena>(totalBlockSize).release();
 	ECSDomainArenas.push_back(std::unique_ptr<EngineArena>(arena));
@@ -108,7 +108,14 @@ void ComponentManager::onComponentAttached(Entity e, uint32_t hashId) {
             if (hasAll(e, group.components, group.count)) {
                 for (size_t i = 0; i < group.count; ++i) {
                     uint32_t compId = group.components[i];
-                    components[compId]->moveToGroup(e);
+                    auto* cd = components[compId].get();
+                    
+                    if (cd->elementSize > 256) {
+                        if (scratchBuffer.size() < cd->elementSize) {
+                            scratchBuffer.resize(cd->elementSize);
+                        }
+                    }
+                    cd->moveToGroup(e, scratchBuffer.data());
                 }
                 group.size++;
             }
@@ -124,7 +131,7 @@ void ComponentManager::onComponentRemoved(Entity e, const uint32_t hashId) {
                 uint32_t compId = group.components[i];
                 auto* cd = components[compId].get();
                 
-                if (cd->sparse[e.id] >= cd->groupedCount) {
+                if (cd->getSparse(e.id) >= cd->groupedCount) {
                     wasInGroup = false; 
                     break;
                 }
@@ -135,10 +142,16 @@ void ComponentManager::onComponentRemoved(Entity e, const uint32_t hashId) {
                     uint32_t compId = group.components[i];
                     auto* cd = components[compId].get();
                     
-                    uint32_t currentIdx = cd->sparse[e.id];
+                    if (cd->elementSize > 256) {
+                        if (scratchBuffer.size() < cd->elementSize) {
+                            scratchBuffer.resize(cd->elementSize);
+                        }
+                    }
+                    
+                    uint32_t currentIdx = cd->getSparse(e.id);
                     cd->groupedCount--;
                     
-                    cd->swapEntities(currentIdx, (uint32_t)cd->groupedCount);
+                    cd->swapEntities(currentIdx, (uint32_t)cd->groupedCount, scratchBuffer.data());
                 }
                 group.size--;
             }
@@ -188,7 +201,6 @@ size_t ComponentManager::getComponentSize(const uint32_t hashId) {
 }
 size_t ComponentManager::getGroupSize(const uint32_t* compNames, size_t count) {
     for (const auto& group : groups) {
-        // Comparing arrays by content
         if (group.count == count && 
             std::memcmp(group.components, compNames, count * sizeof(uint32_t)) == 0) {
             return group.size;
@@ -213,4 +225,22 @@ void* ComponentManager::getRawPtr(const uint32_t hashId, bool lock) {
         getComponentLock(hashId).store(true, std::memory_order_release);
     }
 	return it->second->getRawPtr();
+}
+
+void ComponentManager::queryEntities(uint32_t* componentHashIds, uint32_t count, Entity* outputBuffer) {
+    for (const auto& group : groups) {
+        if (group.count == count && 
+            std::memcmp(group.components, componentHashIds, count * sizeof(uint32_t)) == 0) {
+            
+            if (group.size == 0) return;
+
+            uint32_t firstCompId = group.components[0];
+            auto* cd = components[firstCompId].get();
+            
+            for (size_t i = 0; i < group.size; ++i) {
+                outputBuffer[i] = Entity{ cd->dense[i] };
+            }
+            return;
+        }
+    }
 }

@@ -1,0 +1,10 @@
+{
+    "name": "default_pbr",
+    "pipeline": "pbr",
+    "parameters": {
+        "baseColor": [1.0, 1.0, 1.0, 1.0],
+        "metallic": 0.0,
+        "roughness": 0.5,
+        "textureIndex": -1.0
+    }
+}

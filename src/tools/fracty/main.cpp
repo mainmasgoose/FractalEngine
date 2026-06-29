@@ -39,13 +39,14 @@ public:
         if (command.empty()) {
             std::cout << "Usage: fracty <command> [args]\n";
             std::cout << "Available commands (use 'fracty <command> --help' for details):\n";
-            std::cout << "  engine-build, list-mods, info-mod, scan, init-mod, init-cont, info-cont, add-mod, rem-mod, build, run, cp-cont, rm-cont, arc-cont, unarc-cont, test, help\n";
+            std::cout << "  engine-build, list-mods, info-mod, scan, init-mod, update-mod, init-cont, info-cont, add-mod, rem-mod, build, run, cp-cont, rm-cont, arc-cont, unarc-cont, test, help\n";
         } else {
             if (command == "engine-build") std::cout << "Usage: engine-build [--recache]\n  Build the main Fractal Engine core. Use --recache to clear CMake cache.\n";
             else if (command == "list-mods") std::cout << "Usage: list-mods\n  List all available modules in the modules root.\n";
             else if (command == "info-mod") std::cout << "Usage: info-mod <name>\n  Show detailed info about a module.\n";
             else if (command == "scan") std::cout << "Usage: scan\n  Scan for modules and update project DB.\n";
             else if (command == "init-mod") std::cout << "Usage: init-mod <name>\n  Create a new module from template.\n";
+            else if (command == "update-mod") std::cout << "Usage: update-mod <name>\n  Update existing module from template.\n";
             else if (command == "init-cont") std::cout << "Usage: init-cont <name>\n  Create a new container.\n";
             else if (command == "info-cont") std::cout << "Usage: info-cont <name>\n  Show detailed info about a container.\n";
             else if (command == "add-mod") std::cout << "Usage: add-mod <cont> <mod>\n  Add module to container load order.\n";
@@ -81,6 +82,18 @@ public:
             if (!runCommand(cmakeConfig)) return;
             std::string cmakeBuild = "cmake --build " + buildPath.string() + " --parallel $(nproc)";
             if (!runCommand(cmakeBuild)) return;
+            
+            std::cout << "Updating ModuleTemplate SDK..." << std::endl;
+            fs::path sdkSrc = projectRoot / "include" / "Engine";
+            fs::path sdkDest = projectRoot / "assets" / "templates" / "module" / "src" / "headers";
+            if (fs::exists(sdkSrc)) {
+                fs::create_directories(sdkDest);
+                fs::copy(sdkSrc, sdkDest, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+                std::cout << "SDK headers synchronized to template.\n";
+            } else {
+                std::cerr << "Warning: SDK source not found at " << sdkSrc << "\n";
+            }
+
             std::cout << "Fractal Engine core built successfully.\n";
         } catch (const std::exception& e) { std::cerr << "Error: " << e.what() << std::endl; }
     }
@@ -144,40 +157,94 @@ public:
         std::cout << "Found " << count << " valid modules. Project DB updated.\n";
     }
 
+    void replaceInFile(const fs::path& filePath, const std::string& oldStr, const std::string& newStr) {
+        try {
+            std::ifstream inFile(filePath);
+            if (!inFile) return;
+            std::string content((std::istreambuf_iterator<char>(inFile)), std::istreambuf_iterator<char>());
+            inFile.close();
+
+            size_t pos = 0;
+            bool changed = false;
+            while ((pos = content.find(oldStr, pos)) != std::string::npos) {
+                content.replace(pos, oldStr.length(), newStr);
+                pos += newStr.length();
+                changed = true;
+            }
+
+            if (changed) {
+                std::ofstream outFile(filePath);
+                outFile << content;
+            }
+        } catch (...) {}
+    }
+
+    void doUpdateMod(const std::vector<std::string>& args) {
+        if (args.empty()) { std::cerr << "Error: Module name required.\n"; return; }
+        std::string name = args[0];
+        fs::path modPath = modulesRoot / name;
+        if (!fs::exists(modPath)) { std::cerr << "Error: Module '" << name << "' not found.\n"; return; }
+        try {
+            fs::path templatePath = projectRoot / "assets" / "templates" / "module";
+            if (!fs::exists(templatePath)) { std::cerr << "Error: Template not found.\n"; return; }
+            
+            std::cout << "Updating module '" << name << "' from template...\n";
+            
+            for (const auto& entry : fs::recursive_directory_iterator(templatePath)) {
+                if (entry.is_directory()) continue;
+                
+                fs::path relPath = fs::relative(entry.path(), templatePath);
+                fs::path destPath = modPath / relPath;
+                
+                if (relPath.string().find("src/") == 0) {
+                    if (fs::exists(destPath)) continue;
+                }
+                
+                fs::create_directories(destPath.parent_path());
+                fs::copy_file(entry.path(), destPath, fs::copy_options::overwrite_existing);
+                replaceInFile(destPath, "{{MODULE_NAME}}", name);
+            }
+            
+            std::cout << "Module '" << name << "' updated successfully.\n";
+        } catch (const std::exception& e) { std::cerr << "Error: " << e.what() << std::endl; }
+    }
+
     void doInitMod(const std::vector<std::string>& args) {
         if (args.empty()) { std::cerr << "Error: Module name required.\n"; return; }
         std::string name = args[0];
         fs::path modPath = modulesRoot / name;
         if (fs::exists(modPath)) { std::cerr << "Error: Module directory already exists.\n"; return; }
         try {
-            fs::path archivePath = projectRoot / "assets" / "module_template.tar.gz";
-            if (fs::exists(archivePath)) {
-                fs::create_directories(modPath);
-                std::string cmd = "tar -xzvf " + archivePath.string() + " -C " + modPath.string();
-                if (runCommand(cmd)) {
-                    if (fs::exists(modPath / "build")) fs::remove_all(modPath / "build");
-                    if (fs::exists(modPath / "build-windows-clang")) fs::remove_all(modPath / "build-windows-clang");
-                    fs::create_directories(modPath / "assets");
-                    fs::create_directories(modPath / "configs");
-                    json modJson = {{"id", name}, {"name", name}, {"version", "1.0.0"}, {"assets_root", "assets/"}, {"config_root", "configs/"}, {"dependencies", json::array()}, {"entry_point", name + ".so"}};
-                    std::ofstream file(modPath / "module.json");
-                    file << modJson.dump(4);
-                    
-                    fs::path cmakeLists = modPath / "CMakeLists.txt";
-                    if (fs::exists(cmakeLists)) {
-                        std::ifstream tpl(cmakeLists);
-                        std::string content((std::istreambuf_iterator<char>(tpl)), std::istreambuf_iterator<char>());
-                        size_t pos = 0;
-                        while((pos = content.find("ExampleModule", pos)) != std::string::npos) {
-                            content.replace(pos, 13, name);
-                            pos += name.length();
-                        }
-                        std::ofstream out(cmakeLists);
-                        out << content;
+            fs::path templatePath = projectRoot / "assets" / "templates" / "module";
+            if (fs::exists(templatePath)) {
+                fs::copy(templatePath, modPath, fs::copy_options::recursive);
+                
+                for (const auto& entry : fs::recursive_directory_iterator(modPath)) {
+                    if (entry.is_regular_file()) {
+                        replaceInFile(entry.path(), "{{MODULE_NAME}}", name);
                     }
-                    std::cout << "Module '" << name << "' created from archive.\n";
-                    return;
                 }
+
+                if (fs::exists(modPath / "build")) fs::remove_all(modPath / "build");
+                if (fs::exists(modPath / "build-windows-clang")) fs::remove_all(modPath / "build-windows-clang");
+                
+                fs::create_directories(modPath / "assets");
+                fs::create_directories(modPath / "configs");
+
+                json modJson = {
+                    {"id", name}, 
+                    {"name", name}, 
+                    {"version", "1.0.0"}, 
+                    {"assets_root", "assets/"}, 
+                    {"config_root", "configs/"}, 
+                    {"dependencies", json::array()}, 
+                    {"entry_point", name + ".so"}
+                };
+                std::ofstream file(modPath / "module.json");
+                file << modJson.dump(4);
+                
+                std::cout << "Module '" << name << "' created from template.\n";
+                return;
             }
             
             fs::create_directories(modPath / "src");
@@ -464,6 +531,7 @@ public:
         commandRegistry["info-mod"] = [this](auto& args) { doInfoMod(args); };
         commandRegistry["scan"] = [this](auto& args) { doScan(args); };
         commandRegistry["init-mod"] = [this](auto& args) { doInitMod(args); };
+        commandRegistry["update-mod"] = [this](auto& args) { doUpdateMod(args); };
         commandRegistry["init-module"] = [this](auto& args) { doInitMod(args); };
         commandRegistry["init-cont"] = [this](auto& args) { doInitCont(args); };
         commandRegistry["init-container"] = [this](auto& args) { doInitCont(args); };

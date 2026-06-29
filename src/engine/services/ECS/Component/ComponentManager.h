@@ -147,7 +147,6 @@ public:
      */
     void registerGroup(const uint32_t* componentHashIds, size_t count);
 
-
     /**
      * Checks if a value exists within an array.
      * 
@@ -174,6 +173,14 @@ public:
      * @return The number of matching entities.
      */
     size_t getGroupSize(const uint32_t* compNames, size_t count);
+    /**
+     * Queries entities that possess a specific set of components.
+     * 
+     * @param componentHashIds Array of component identifiers defining the query.
+     * @param count Number of components in the array.
+     * @param outputBuffer Buffer to write the matching entities into.
+     */
+    void queryEntities(uint32_t* componentHashIds, uint32_t count, Entity* outputBuffer);
 
     /**
      * Gets the raw memory pointer for a component type.
@@ -206,6 +213,7 @@ public:
      */
     void setComponentLock(const uint32_t hashId, bool lock);
 
+
 private:
 
 
@@ -224,5 +232,6 @@ private:
     std::mutex cmdLock;
     std::unique_ptr<EngineArena> cmdMem = nullptr;
     std::vector<std::unique_ptr<EngineArena>> ECSDomainArenas; // one arena per component
+    std::vector<char> scratchBuffer;
     
 };

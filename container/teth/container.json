@@ -1,0 +1,15 @@
+{
+    "container_id": "teth",
+    "global_settings": {
+        "log_level": "Verbose"
+    },
+    "load_order": [
+        "TetherX"
+    ],
+    "metadata": {
+        "build_type": "Debug",
+        "target_platform": "Linux"
+    },
+    "name": "teth",
+    "version": "1.0.0"
+}

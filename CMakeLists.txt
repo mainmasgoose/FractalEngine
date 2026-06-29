@@ -60,4 +60,7 @@ if(UNIX AND NOT APPLE)
     target_link_libraries(fractal_app PRIVATE dl)
 endif()
 
+add_executable(test_ecs src/tests/test_ecs.cpp)
+target_link_libraries(test_ecs PRIVATE engine)
+
 install(TARGETS fractal_app engine)

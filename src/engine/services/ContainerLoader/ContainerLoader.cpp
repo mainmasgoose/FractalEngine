@@ -67,6 +67,7 @@ void ContainerLoader::loadActiveContainer() {
         loadModuleContext loadCtx;
         std::strncpy(loadCtx.path, modPath.c_str(), sizeof(loadCtx.path) - 1);
         loadCtx.config = config;
+        std::strncpy(loadCtx.config.loadedModulePath, modPath.c_str(), sizeof(loadCtx.config.loadedModulePath) - 1);
 
         FURCMDPacket loadPacket;
         loadPacket.methodHash = loadModuleHash;

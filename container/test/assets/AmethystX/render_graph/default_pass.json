@@ -1,0 +1,13 @@
+{
+    "name": "main_pass",
+    "type": "raster",
+    "shaders": {
+        "vertex": "assets/shaders/pbr.vert",
+        "fragment": "assets/shaders/pbr.frag"
+    },
+    "state": {
+        "depthTest": true,
+        "depthWrite": true,
+        "blend": false
+    }
+}

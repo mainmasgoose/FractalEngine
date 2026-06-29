@@ -1,40 +1,49 @@
 #include "entity.h"
 
 Entity EntityManager::createEntity() {
-    Entity e;
+    uint32_t id;
+    uint32_t version;
     
-
     if (!freeIds.empty()) {
-        e.id = freeIds.back();
+        id = freeIds.back();
         freeIds.pop_back();
+        version = versions[id];
     } else {
-        e.id = nextEntityId++;
+        id = nextEntityId++;
+        versions.push_back(1);
+        active.push_back(true);
+        version = 1;
     }
     
-    activeEntities.insert(e);
-    return e;
+    if (id >= active.size()) {
+        active.resize(id + 1, false);
+    }
+    active[id] = true;
+    activeCount++;
+    return Entity{ id, version };
 }
 
 void EntityManager::destroyEntity(Entity e) {
-    if (activeEntities.erase(e) > 0) {
+    if (isValid(e)) {
+        active[e.id] = false;
+        versions[e.id]++;
         freeIds.push_back(e.id);
+        activeCount--;
     }
 }
 
 std::optional<Entity> EntityManager::getEntityById(uint32_t id) {
-    Entity e{ id };
-    auto it = activeEntities.find(e);
-    
-    if (it != activeEntities.end()) {
-        return *it;
+    if (id < versions.size() && active[id]) {
+        return Entity{ id, versions[id] };
     }
     return std::nullopt;
 }
 
 bool EntityManager::isValid(Entity e) const {
-    return activeEntities.find(e) != activeEntities.end();
+    return e.id < versions.size() && active[e.id] && versions[e.id] == e.version;
 }
 
 uint32_t EntityManager::getEntityCount() const {
-    return activeEntities.size();
+    return activeCount;
 }
+

@@ -1,0 +1,16 @@
+{
+    "container_id": "test",
+    "global_settings": {
+        "log_level": "Verbose"
+    },
+    "load_order": [
+        "AmethystX",
+        "TetherX"
+    ],
+    "metadata": {
+        "build_type": "Debug",
+        "target_platform": "Linux"
+    },
+    "name": "test",
+    "version": "1.0.0"
+}

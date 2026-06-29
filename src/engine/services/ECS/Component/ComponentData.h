@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <new>
 #include <stdexcept>
+#include <cassert>
 #include "engine/services/MemoryAlloc/EngineArena.h"
 #include "engine/services/MemoryAlloc/MemoryAlloc.h"
 
@@ -13,24 +14,44 @@ struct ComponentData {
     static size_t align_up(size_t size, size_t alignment) {
         return (size + alignment - 1) & ~(alignment - 1);
     }
+    static constexpr size_t PAGE_SIZE = 1024;
     size_t groupedCount = 0;
     void* data = nullptr;
     size_t elementSize = 0;
     size_t capacity = 0;
     std::vector<uint32_t, ArenaAllocator<uint32_t>> dense;
-    std::vector<uint32_t, ArenaAllocator<uint32_t>> sparse;
+    std::vector<uint32_t*> pages;
     EngineArena* arena_ptr;
 
     ComponentData(size_t elemSize, size_t cap, EngineArena* arena)
         : capacity(cap), 
         dense(ArenaAllocator<uint32_t>(arena)),
-        sparse(ArenaAllocator<uint32_t>(arena)),
         arena_ptr(arena){
         elementSize = align_up(elemSize, 16);
 
-        data = arena_ptr->allocate(elementSize * capacity, alignof(std::max_align_t));
+        data = arena_ptr->allocate(elementSize * capacity, 64);
         dense.reserve(cap);
-        sparse.resize(cap, 0xFFFFFFFF);
+    }
+
+    uint32_t getSparse(uint32_t id) {
+        uint32_t pageIdx = id / PAGE_SIZE;
+        uint32_t offset = id % PAGE_SIZE;
+        if (pageIdx >= pages.size() || pages[pageIdx] == nullptr) return 0xFFFFFFFF;
+        return pages[pageIdx][offset];
+    }
+
+    void setSparse(uint32_t id, uint32_t value) {
+        uint32_t pageIdx = id / PAGE_SIZE;
+        uint32_t offset = id % PAGE_SIZE;
+        if (pageIdx >= pages.size()) {
+            pages.resize(pageIdx + 1, nullptr);
+        }
+        if (pages[pageIdx] == nullptr) {
+            uint32_t* page = static_cast<uint32_t*>(arena_ptr->allocate(PAGE_SIZE * sizeof(uint32_t), alignof(uint32_t)));
+            std::memset(page, 0xFF, PAGE_SIZE * sizeof(uint32_t));
+            pages[pageIdx] = page;
+        }
+        pages[pageIdx][offset] = value;
     }
 
     void resize(size_t newCapacity) {
@@ -39,7 +60,6 @@ struct ComponentData {
         void* newData = arena_ptr->allocate(elementSize * newCapacity, alignof(std::max_align_t));
         
         for (size_t i = 0; i < dense.size(); ++i) {
-            uint32_t entId = dense[i];
             std::memcpy(static_cast<char*>(newData) + elementSize * i, 
                         static_cast<char*>(data) + elementSize * i, 
                         elementSize);
@@ -47,10 +67,9 @@ struct ComponentData {
         
         data = newData;
         capacity = newCapacity;
-        sparse.resize(capacity, 0xFFFFFFFF);
         
         for (size_t i = 0; i < dense.size(); ++i) {
-            sparse[dense[i]] = static_cast<uint32_t>(i);
+            setSparse(dense[i], static_cast<uint32_t>(i));
         }
     }
 
@@ -59,81 +78,80 @@ struct ComponentData {
     void* getRawPtr() { return data; }
 
     void attach(Entity e, void* elem) {
-        if (e.id >= capacity) throw std::runtime_error("Entity ID exceeds capacity");
-        if (sparse[e.id] != 0xFFFFFFFF) throw std::runtime_error("Entity already has component");
+        if (dense.size() >= capacity) {
+            resize(capacity * 2);
+        }
+        assert(getSparse(e.id) == 0xFFFFFFFF && "Entity already has component");
 
-        sparse[e.id] = static_cast<uint32_t>(dense.size());
+        setSparse(e.id, static_cast<uint32_t>(dense.size()));
         dense.push_back(e.id);
-        std::memcpy(static_cast<char*>(data) + elementSize * sparse[e.id], elem, elementSize);
+        std::memcpy(static_cast<char*>(data) + elementSize * getSparse(e.id), elem, elementSize);
     }
-    void swapEntities(uint32_t idx1, uint32_t idx2){
+    void swapEntities(uint32_t idx1, uint32_t idx2, char* scratchBuffer){
         if (idx1 == idx2) return;
 
         uint32_t ent1 = dense[idx1];
         uint32_t ent2 = dense[idx2];
         dense[idx1] = ent2;
         dense[idx2] = ent1;
-        sparse[ent1] = idx2;
-        sparse[ent2] = idx1;
+        setSparse(ent1, idx2);
+        setSparse(ent2, idx1);
         
         char* ptr1 = static_cast<char*>(data) + (idx1 * elementSize);
         char* ptr2 = static_cast<char*>(data) + (idx2 * elementSize);
         
-        // Use a stack buffer for small components, and a heap buffer for large ones
         char stackTemp[256];
         void* temp = nullptr;
-        std::vector<char> heapTemp;
         
         if (elementSize <= 256) {
             temp = stackTemp;
         } else {
-            heapTemp.resize(elementSize);
-            temp = heapTemp.data();
+            temp = scratchBuffer;
         }
         
         std::memcpy(temp, ptr1, elementSize);
         std::memcpy(ptr1, ptr2, elementSize);
         std::memcpy(ptr2, temp, elementSize);
     }
-    void moveToGroup(Entity e) {
-        uint32_t currentIdx = sparse[e.id];
+    void moveToGroup(Entity e, char* scratchBuffer) {
+        uint32_t currentIdx = getSparse(e.id);
         if (currentIdx < groupedCount) return;
 
-        swapEntities(currentIdx, groupedCount);
+        swapEntities(currentIdx, groupedCount, scratchBuffer);
         groupedCount++;
     }
 
-    void removeFromGroup(Entity e) {
-        uint32_t currentIdx = sparse[e.id];
+    void removeFromGroup(Entity e, char* scratchBuffer) {
+        uint32_t currentIdx = getSparse(e.id);
         if (currentIdx >= groupedCount) return;
 
         groupedCount--;
-        swapEntities(currentIdx, groupedCount);
+        swapEntities(currentIdx, groupedCount, scratchBuffer);
     }
     void* get(Entity e) {
-        if (e.id >= capacity) throw std::runtime_error("Entity ID exceeds capacity");
-        uint32_t idx = sparse[e.id];
-        if (idx == 0xFFFFFFFF) throw std::runtime_error("Entity does not have component");
+        assert(e.id < capacity && "Entity ID exceeds capacity");
+        uint32_t idx = getSparse(e.id);
+        assert(idx != 0xFFFFFFFF && "Entity does not have component");
         return static_cast<char*>(data) + elementSize * idx;
     }
 
     void remove(Entity e) {
-        if (e.id >= capacity) throw std::runtime_error("Entity ID exceeds capacity");
-        uint32_t idx = sparse[e.id];
+        assert(e.id < capacity && "Entity ID exceeds capacity");
+        uint32_t idx = getSparse(e.id);
         if (idx == 0xFFFFFFFF) return;
 
         uint32_t lastEid = dense.back();
         std::memcpy(static_cast<char*>(data) + elementSize * idx,
-                    static_cast<char*>(data) + elementSize * sparse[lastEid],
+                    static_cast<char*>(data) + elementSize * getSparse(lastEid),
                     elementSize);
         dense[idx] = lastEid;
-        sparse[lastEid] = idx;
+        setSparse(lastEid, idx);
 
         dense.pop_back();
-        sparse[e.id] = 0xFFFFFFFF;
+        setSparse(e.id, 0xFFFFFFFF);
     }
 
     bool has(Entity e) {
-        return e.id < capacity && sparse[e.id] != 0xFFFFFFFF;
+        return e.id < capacity && getSparse(e.id) != 0xFFFFFFFF;
     }
 };

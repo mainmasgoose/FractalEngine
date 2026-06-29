@@ -68,6 +68,12 @@ struct getGroupSizeCMDContext {
     uint32_t count;
 };
 
+struct queryEntitiesCMDContext {
+    uint32_t domainId;
+    uint32_t* componentHashIds;
+    uint32_t count;
+};
+
 struct getRawPtrCMDContext {
     uint32_t domainId;
     uint32_t componentId;
@@ -124,6 +130,7 @@ public:
     static void containsCMD(FURCMDPacket& packet);
     static void hasAllCMD(FURCMDPacket& packet);
     static void getGroupSizeCMD(FURCMDPacket& packet);
+    static void queryEntitiesCMD(FURCMDPacket& packet);
     static void getRawPtrCMD(FURCMDPacket& packet);
 
     static void getComponentLockCMD(FURCMDPacket& packet);

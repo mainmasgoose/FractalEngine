@@ -1,0 +1,15 @@
+{
+    "container_id": "anch",
+    "global_settings": {
+        "log_level": "Verbose"
+    },
+    "load_order": [
+        "AnchorX"
+    ],
+    "metadata": {
+        "build_type": "Debug",
+        "target_platform": "Linux"
+    },
+    "name": "anch",
+    "version": "1.0.0"
+}
